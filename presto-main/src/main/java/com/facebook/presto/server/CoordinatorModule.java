@@ -29,6 +29,8 @@ import com.facebook.presto.dispatcher.DispatchManager;
 import com.facebook.presto.dispatcher.DispatchQueryFactory;
 import com.facebook.presto.dispatcher.FailedDispatchQueryFactory;
 import com.facebook.presto.dispatcher.LocalDispatchQueryFactory;
+import com.facebook.presto.dynamicCatalog.DynamicCatalogController;
+import com.facebook.presto.dynamicCatalog.ResponseParser;
 import com.facebook.presto.event.QueryMonitor;
 import com.facebook.presto.event.QueryMonitorConfig;
 import com.facebook.presto.execution.ClusterSizeMonitor;
@@ -154,6 +156,11 @@ public class CoordinatorModule
         jaxrsBinder(binder).bind(ExecutingStatementResource.class);
         binder.bind(StatementHttpExecutionMBean.class).in(Scopes.SINGLETON);
         newExporter(binder).export(StatementHttpExecutionMBean.class).withGeneratedName();
+
+        // dynamic catalog
+        jaxrsBinder(binder).bind(DynamicCatalogController.class);
+        binder.bind(ResponseParser.class).in(Scopes.SINGLETON);
+        newExporter(binder).export(DynamicCatalogController.class).withGeneratedName();
 
         // resource for serving static content
         jaxrsBinder(binder).bind(WebUiResource.class);

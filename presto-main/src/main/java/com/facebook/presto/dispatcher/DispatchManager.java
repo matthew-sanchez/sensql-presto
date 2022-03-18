@@ -27,6 +27,7 @@ import com.facebook.presto.execution.warnings.WarningCollectorFactory;
 import com.facebook.presto.metadata.SessionPropertyManager;
 import com.facebook.presto.resourcemanager.ClusterStatusSender;
 import com.facebook.presto.security.AccessControl;
+import com.facebook.presto.sensql.SenSQLModule;
 import com.facebook.presto.server.BasicQueryInfo;
 import com.facebook.presto.server.SessionContext;
 import com.facebook.presto.server.SessionPropertyDefaults;
@@ -37,6 +38,9 @@ import com.facebook.presto.spi.WarningCollector;
 import com.facebook.presto.spi.resourceGroups.QueryType;
 import com.facebook.presto.spi.resourceGroups.SelectionContext;
 import com.facebook.presto.spi.resourceGroups.SelectionCriteria;
+import com.facebook.presto.sql.tree.Query;
+import com.facebook.presto.sql.tree.QuerySpecification;
+import com.facebook.presto.sql.tree.Statement;
 import com.facebook.presto.transaction.TransactionManager;
 import com.google.common.util.concurrent.AbstractFuture;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -53,6 +57,7 @@ import java.util.concurrent.Executor;
 
 import static com.facebook.presto.SystemSessionProperties.getWarningHandlingLevel;
 import static com.facebook.presto.spi.StandardErrorCode.QUERY_TEXT_TOO_LARGE;
+import static com.facebook.presto.sql.ParsingUtil.createParsingOptions;
 import static com.facebook.presto.util.StatementUtils.getQueryType;
 import static com.facebook.presto.util.StatementUtils.isTransactionControlStatement;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -84,6 +89,8 @@ public class DispatchManager
     private final QueryTracker<DispatchQuery> queryTracker;
 
     private final QueryManagerStats stats = new QueryManagerStats();
+
+    private final SenSQLModule senSQLModule;
 
     @Inject
     public DispatchManager(
@@ -120,6 +127,8 @@ public class DispatchManager
         this.clusterStatusSender = requireNonNull(clusterStatusSender, "clusterStatusSender is null");
 
         this.queryTracker = new QueryTracker<>(queryManagerConfig, dispatchExecutor.getScheduledExecutor());
+
+        this.senSQLModule = new SenSQLModule();
     }
 
     @PostConstruct
@@ -186,7 +195,29 @@ public class DispatchManager
 
             // prepare query
             WarningCollector warningCollector = warningCollectorFactory.create(getWarningHandlingLevel(session));
-            preparedQuery = queryPreparer.prepareQuery(session, query, warningCollector);
+
+            // create statement from raw query
+            Statement rawStatement = queryPreparer.sqlParser.createStatement(query, createParsingOptions(session, warningCollector));
+            System.out.println("RECIEVED: " + rawStatement.toString());
+
+            System.out.println(getQueryType(rawStatement.getClass()).get());
+            if (getQueryType(rawStatement.getClass()).get() == QueryType.SELECT) {
+//                attempt at a rewrite via tree traversal
+//                senSQLModule.rewrite(rawStatement, queryPreparer, session, warningCollector);
+                QuerySpecification originalBody = ((QuerySpecification) ((((Query) rawStatement).getQueryBody())));
+                try {
+                    preparedQuery = senSQLModule.rewrite(originalBody, queryPreparer, session, warningCollector);
+                }
+                catch (Exception e) {
+                    System.out.println("exception: " + e.toString());
+                    throw e;
+                }
+//                senSQLModule.rewrite(preparedQuery.getStatement(), queryPreparer, session, warningCollector);
+                System.out.println("rewritten: " + preparedQuery.getStatement().toString());
+            }
+            else {
+                preparedQuery = queryPreparer.prepareQuery(session, query, warningCollector);
+            }
             query = preparedQuery.getFormattedQuery().orElse(query);
 
             // select resource group
